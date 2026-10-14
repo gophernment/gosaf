@@ -62,7 +62,7 @@ States: Closed, Open, HalfOpen.
 - **Open → HalfOpen**: lazily when a call arrives after `OpenTimeout`. No timer.
 - **HalfOpen**: admit up to `HalfOpenMaxCalls` probes; extra calls rejected with `ErrHalfOpenFull`.
   When all probes complete: rates below thresholds → Closed (window reset), else → Open.
-  Probe not completed within `ProbeTimeout` → counted as failure, slot reclaimed.
+  A probe not completed within `ProbeTimeout` (or a clock step back past its deadline) is treated as a failed probe: the circuit fails closed and re-opens immediately, slots are reclaimed, and the probe's late result is dropped by generation. Likewise an Open circuit whose clock steps back restarts its wait from the new time.
 - **Outcome**: Success, Failure, Slow (success exceeding `SlowCallDuration`), Ignored
   (`context.Canceled` by default, or excluded by `IsFailure`; not recorded). `context.DeadlineExceeded` is a Failure: a dependency that hangs until timeout must still trip the breaker.
 - **Generation**: bumped on every transition and window reset; results carrying an old

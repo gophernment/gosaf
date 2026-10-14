@@ -59,11 +59,16 @@ func NewMachine(cfg MachineConfig, win Window) *Machine {
 // Admit decides whether a call may run now.
 func (m *Machine) Admit(now time.Time) (Admission, []Transition) {
 	var ts []Transition
+	if m.state == Open && now.Before(m.openedAt) {
+		m.openedAt = now // clock stepped back: restart the wait instead of sticking
+	}
 	if m.state == Open && m.openRemaining(now) == 0 {
 		ts = append(ts, m.enter(HalfOpen, now))
 	}
-	if m.state == HalfOpen && m.half.pending > 0 && !now.Before(m.half.deadline) {
-		// A probe never reported back: fail closed and re-open.
+	if m.state == HalfOpen && m.half.pending > 0 &&
+		(!now.Before(m.half.deadline) || m.half.deadline.Sub(now) > m.cfg.ProbeTimeout) {
+		// A probe never reported back (or the clock stepped back past its
+		// deadline): fail closed and re-open.
 		ts = append(ts, m.enter(Open, now))
 	}
 
@@ -157,6 +162,9 @@ func (m *Machine) enter(to State, now time.Time) Transition {
 // openRemaining is how long until an Open circuit may probe, within
 // [0, OpenTimeout] even if the clock steps backwards.
 func (m *Machine) openRemaining(now time.Time) time.Duration {
-	rem := m.cfg.OpenTimeout - now.Sub(m.openedAt)
-	return min(max(rem, 0), m.cfg.OpenTimeout)
+	elapsed := now.Sub(m.openedAt)
+	if elapsed < 0 {
+		return m.cfg.OpenTimeout // avoids Duration overflow in the subtraction below
+	}
+	return max(m.cfg.OpenTimeout-elapsed, 0)
 }

@@ -300,3 +300,8 @@ func TestCustomIsFailure(t *testing.T) {
 		t.Fatalf("excluded error counted: total = %d", got)
 	}
 }
+
+func TestZeroValuePermitDoneIsSafe(t *testing.T) {
+	var p guard.Permit
+	p.Done(errBoom) // must not panic
+}

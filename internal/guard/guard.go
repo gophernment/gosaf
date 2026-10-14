@@ -112,9 +112,10 @@ func (g *Guard) Allow(ctx context.Context) (*Permit, error) {
 	return &Permit{g: g, gen: adm.Gen, start: now}, nil
 }
 
-// Done reports the call's result. It is safe on a nil Permit and idempotent.
+// Done reports the call's result. It is idempotent and a no-op on a nil or
+// zero-value Permit.
 func (p *Permit) Done(err error) {
-	if p == nil || !p.done.CompareAndSwap(false, true) {
+	if p == nil || p.g == nil || !p.done.CompareAndSwap(false, true) {
 		return
 	}
 	g := p.g

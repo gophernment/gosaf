@@ -223,3 +223,29 @@ func TestResetClosesAndDropsInFlight(t *testing.T) {
 		t.Fatalf("reset of closed machine reported %+v", ts)
 	}
 }
+
+func TestHungProbeIsReclaimedWhenClockGoesBackwards(t *testing.T) {
+	m := newMachine(1)
+	tripOpen(t, m, t0)
+	now := t0.Add(openTimeout)
+	m.Admit(now) // probe that never reports back
+
+	adm, ts := m.Admit(now.Add(-time.Hour))
+	if adm.Reject != circuit.RejectedOpen || len(ts) != 1 || ts[0].To != circuit.Open {
+		t.Fatalf("got %+v %+v, want hung probe reclaimed and circuit re-opened", adm, ts)
+	}
+}
+
+func TestOpenDoesNotStickWhenClockGoesBackwards(t *testing.T) {
+	m := newMachine(1)
+	tripOpen(t, m, t0)
+
+	back := t0.Add(-time.Hour)
+	adm, _ := m.Admit(back)
+	if adm.Reject != circuit.RejectedOpen || adm.RetryAfter != openTimeout {
+		t.Fatalf("admission = %+v, want RejectedOpen with a fresh full wait", adm)
+	}
+	if adm, _ := m.Admit(back.Add(openTimeout)); adm.Reject != circuit.Admitted {
+		t.Fatalf("admission = %+v, want probe admitted OpenTimeout after the step back", adm)
+	}
+}
