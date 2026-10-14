@@ -82,4 +82,5 @@ go test -race -shuffle=on -count=1 ./...
 
 ## License
 
-TBD
+[MIT](LICENSE). No third-party code is included, so no NOTICE file is needed.
+Design was inspired by [sony/gobreaker](https://github.com/sony/gobreaker) (MIT); no code was copied.
