@@ -3,6 +3,15 @@
 All notable changes are documented here. Versions follow [Semantic Versioning](https://semver.org/);
 while the major version is 0, the API may change between minor versions.
 
+## [Unreleased]
+
+### Added
+- `Config.ConsecutiveFailures`: trip after N failures in a row, independent of `MinCalls` (0 disables it).
+
+### Changed
+- Half-Open re-opens as soon as the probes seen so far make recovery impossible, instead of waiting
+  for every probe to finish.
+
 ## [0.1.0] - 2026-10-14
 
 First release.

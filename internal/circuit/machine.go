@@ -49,6 +49,7 @@ type Machine struct {
 	gen      uint64
 	openedAt time.Time
 	half     probes
+	consec   int // failures in a row while Closed; only tracked when enabled
 }
 
 // NewMachine returns a Closed machine.
@@ -103,7 +104,14 @@ func (m *Machine) Record(now time.Time, gen uint64, o Outcome) []Transition {
 			return nil
 		}
 		m.win.Record(now, o)
-		if m.cfg.Policy.Tripped(m.win.Counts(now)) {
+		if m.cfg.Policy.ConsecutiveFailures > 0 {
+			if o == Failure {
+				m.consec++
+			} else {
+				m.consec = 0
+			}
+		}
+		if m.cfg.Policy.Tripped(m.win.Counts(now)) || m.cfg.Policy.ConsecutiveTripped(m.consec) {
 			return []Transition{m.enter(Open, now)}
 		}
 	case HalfOpen:
@@ -114,11 +122,13 @@ func (m *Machine) Record(now time.Time, gen uint64, o Outcome) []Transition {
 		}
 		m.half.completed++
 		m.half.counts.add(o)
+		// Re-open as soon as the probes seen so far make recovery impossible,
+		// without waiting for the rest to finish against a failing dependency.
+		if m.cfg.Policy.Doomed(m.half.counts, m.cfg.HalfOpenMaxCalls) {
+			return []Transition{m.enter(Open, now)}
+		}
 		if m.half.completed < m.cfg.HalfOpenMaxCalls {
 			return nil
-		}
-		if m.cfg.Policy.Unhealthy(m.half.counts) {
-			return []Transition{m.enter(Open, now)}
 		}
 		return []Transition{m.enter(Closed, now)}
 	}
@@ -150,6 +160,7 @@ func (m *Machine) enter(to State, now time.Time) Transition {
 	m.state = to
 	m.gen++
 	m.half = probes{}
+	m.consec = 0
 	switch to {
 	case Open:
 		m.openedAt = now

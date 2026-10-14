@@ -15,8 +15,8 @@ dependency ships as a **separate module** so the core stays dependency-free.
 | Context support | none in `Execute` | `Do(ctx, ...)`, cancel excluded from stats | done (v0.1) |
 | Callbacks | run under the mutex (re-entrancy deadlock) | run after unlock, panics contained | done (v0.1) |
 | Window | tumbling `Interval`, optional buckets | sliding count/time window, bounded memory | done (v0.1) |
-| Trip policy | consecutive failures; ratios are DIY | failure rate + slow-call rate + `MinCalls` | done (v0.1) |
-| Stuck Half-Open | skipped/duplicate `done` can stall it | idempotent `Done`, probe timeout, panic/`Goexit` safe | done (v0.1) |
+| Trip policy | consecutive failures; ratios are DIY | failure rate + slow-call rate + `MinCalls` (v0.1) + consecutive failures | v0.1.1 |
+| Stuck Half-Open | skipped/duplicate `done` can stall it | idempotent `Done`, probe timeout, panic/`Goexit` safe (v0.1); early re-open when recovery is impossible | v0.1.1 |
 | Config | zero values silently defaulted | validated, fail closed | done (v0.1) |
 | Correctness proof | example tests | model-based + property tests, race stress, fuzz | v0.2 |
 | Performance | baseline | `ns/op` and `allocs/op` no worse on the hot path | v0.2 (not yet measured) |
@@ -33,6 +33,11 @@ with reproducible numbers.
 
 - Publish the repo, push `main` and `v0.1.0`, confirm CI is green on Linux; enable private
   vulnerability reporting and Dependabot alerts.
+- (done, unreleased) Half-Open reacts faster: re-open as soon as the probes already seen make a healthy outcome
+  impossible (best case: every remaining probe succeeds), instead of waiting for all probes while
+  still sending traffic to a failing dependency. gobreaker re-opens on the first probe failure.
+- (done, unreleased) `Config.ConsecutiveFailures`: trip after N failures in a row (independent of `MinCalls`),
+  covering the common "5 in a row" rule that gobreaker's default `ReadyToTrip` offers.
 - Cap `OpenTimeout` in `Config.validate` (Duration overflow guard).
 - Document: `Listener` runs on the caller goroutine and may block it; event ordering across
   goroutines; `State()`/`Snapshot()` are lazy (Open→Half-Open happens on the next `Allow`);

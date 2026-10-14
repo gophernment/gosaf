@@ -93,6 +93,8 @@ func New(cfg Config) (*Breaker, error) {
 			MinCalls:    cfg.MinCalls,
 			FailureRate: cfg.FailureRate,
 			SlowRate:    cfg.SlowCallRate,
+
+			ConsecutiveFailures: cfg.ConsecutiveFailures,
 		},
 		OpenTimeout:      cfg.OpenTimeout,
 		HalfOpenMaxCalls: cfg.HalfOpenMaxCalls,

@@ -62,6 +62,27 @@ func TestDoReturnsResultAndError(t *testing.T) {
 	}
 }
 
+func TestConsecutiveFailuresTripBeforeMinCalls(t *testing.T) {
+	clk := &clock{t: time.Unix(1_000_000, 0)}
+	cfg := gosaf.DefaultConfig() // MinCalls is 20
+	cfg.ConsecutiveFailures = 3
+	cfg.Clock = clk.Now
+	b, err := gosaf.New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	failOnce(b)
+	failOnce(b)
+	if b.State() != gosaf.Closed {
+		t.Fatalf("State = %v, want closed after 2 failures", b.State())
+	}
+	failOnce(b)
+	if b.State() != gosaf.Open {
+		t.Fatalf("State = %v, want open after 3 consecutive failures", b.State())
+	}
+}
+
 func TestDoFailsFastWhenOpen(t *testing.T) {
 	b, _ := newBreaker(t)
 	failOnce(b)

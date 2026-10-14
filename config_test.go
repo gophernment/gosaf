@@ -32,6 +32,7 @@ func TestNewRejectsInvalidConfig(t *testing.T) {
 		{"WindowSize", func(c *gosaf.Config) { c.WindowSize = gosaf.MaxWindowSize + 1 }},
 		{"WindowPeriod", func(c *gosaf.Config) { c.WindowPeriod = -time.Second }},
 		{"WindowPeriod", func(c *gosaf.Config) { c.WindowPeriod = time.Duration(c.WindowSize) - 1 }},
+		{"ConsecutiveFailures", func(c *gosaf.Config) { c.ConsecutiveFailures = -1 }},
 		{"MinCalls", func(c *gosaf.Config) { c.MinCalls = 0 }},
 		{"MinCalls", func(c *gosaf.Config) { c.MinCalls = c.WindowSize + 1 }},
 		{"FailureRate", func(c *gosaf.Config) { c.FailureRate = 0 }},

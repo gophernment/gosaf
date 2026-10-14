@@ -32,6 +32,9 @@ type Config struct {
 	MinCalls int
 	// FailureRate in (0,1]: trip when failures/calls reaches it.
 	FailureRate float64
+	// ConsecutiveFailures trips the circuit after this many failures in a row,
+	// even before MinCalls calls were seen. 0 disables it (the default).
+	ConsecutiveFailures int
 	// SlowCallDuration: a successful call taking longer counts as slow.
 	SlowCallDuration time.Duration
 	// SlowCallRate in (0,1]: trip when slow/calls reaches it.
@@ -77,6 +80,8 @@ func (c Config) validate() error {
 		return invalid("WindowPeriod", "must not be negative")
 	case c.WindowPeriod > 0 && c.WindowPeriod < time.Duration(c.WindowSize):
 		return invalid("WindowPeriod", "must be at least WindowSize nanoseconds")
+	case c.ConsecutiveFailures < 0:
+		return invalid("ConsecutiveFailures", "must not be negative")
 	case c.MinCalls < 1:
 		return invalid("MinCalls", "must be at least 1")
 	case c.WindowPeriod == 0 && c.MinCalls > c.WindowSize:

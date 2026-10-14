@@ -49,7 +49,7 @@ case err != nil:
 ```
 
 Tune behaviour through `gosaf.Config`: sliding window (count- or time-based), failure rate,
-slow-call rate, open timeout, half-open probes and probe timeout. `IsFailure` excludes errors
+slow-call rate, consecutive failures, open timeout, half-open probes and probe timeout. `IsFailure` excludes errors
 (for example "not found") from the statistics; `context.Canceled` is excluded by default.
 A `Listener` receives state changes and call results.
 

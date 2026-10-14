@@ -249,3 +249,70 @@ func TestOpenDoesNotStickWhenClockGoesBackwards(t *testing.T) {
 		t.Fatalf("admission = %+v, want probe admitted OpenTimeout after the step back", adm)
 	}
 }
+
+func TestHalfOpenReopensEarlyWhenRecoveryIsImpossible(t *testing.T) {
+	m := newMachine(4)
+	tripOpen(t, m, t0)
+	now := t0.Add(openTimeout)
+	var probes [4]circuit.Admission
+	for i := range probes {
+		probes[i], _ = m.Admit(now)
+	}
+
+	if ts := m.Record(now, probes[0].Gen, circuit.Failure); ts != nil {
+		t.Fatalf("1 failure of 4 can still recover, got %+v", ts)
+	}
+	ts := m.Record(now, probes[1].Gen, circuit.Failure) // 2/4 >= 0.5 even if the rest succeed
+	if len(ts) != 1 || ts[0] != (circuit.Transition{From: circuit.HalfOpen, To: circuit.Open}) {
+		t.Fatalf("transitions = %+v, want half-open->open while 2 probes are pending", ts)
+	}
+	if late := m.Record(now, probes[2].Gen, circuit.Success); late != nil {
+		t.Fatalf("late probe result caused %+v", late)
+	}
+}
+
+func newConsecutiveMachine() *circuit.Machine {
+	return circuit.NewMachine(circuit.MachineConfig{
+		Policy:           circuit.Policy{MinCalls: 100, FailureRate: 1, SlowRate: 1, ConsecutiveFailures: 3},
+		OpenTimeout:      openTimeout,
+		HalfOpenMaxCalls: 1,
+		ProbeTimeout:     probeTimeout,
+	}, circuit.NewCountWindow(100))
+}
+
+func TestConsecutiveFailuresTripBelowMinCalls(t *testing.T) {
+	tests := []struct {
+		name     string
+		outcomes []circuit.Outcome
+		want     circuit.State
+	}{
+		{"two in a row", []circuit.Outcome{circuit.Failure, circuit.Failure}, circuit.Closed},
+		{"three in a row", []circuit.Outcome{circuit.Failure, circuit.Failure, circuit.Failure}, circuit.Open},
+		{"success resets", []circuit.Outcome{circuit.Failure, circuit.Failure, circuit.Success, circuit.Failure}, circuit.Closed},
+		{"slow resets", []circuit.Outcome{circuit.Failure, circuit.Failure, circuit.Slow, circuit.Failure}, circuit.Closed},
+		{"ignored does not reset", []circuit.Outcome{circuit.Failure, circuit.Failure, circuit.Ignored, circuit.Failure}, circuit.Open},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newConsecutiveMachine()
+			for _, o := range tt.outcomes {
+				call(t, m, t0, o)
+			}
+			if got := state(m, t0); got != tt.want {
+				t.Fatalf("state = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestConsecutiveCounterRestartsAfterReset(t *testing.T) {
+	m := newConsecutiveMachine()
+	call(t, m, t0, circuit.Failure)
+	call(t, m, t0, circuit.Failure)
+	m.Reset(t0)
+	call(t, m, t0, circuit.Failure)
+	call(t, m, t0, circuit.Failure)
+	if got := state(m, t0); got != circuit.Closed {
+		t.Fatalf("state = %v, want closed: failures before Reset must not count", got)
+	}
+}
