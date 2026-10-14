@@ -32,7 +32,7 @@ with reproducible numbers.
 ## v0.1.1 — finish v0.1 (patch)
 
 - Publish the repo, push `main` and the tags, confirm CI is green on Linux; enable private
-  vulnerability reporting and Dependabot alerts. (open: waiting for the first push)
+  vulnerability reporting and Dependabot alerts. (done: CI green on Linux for v0.1.1)
 - (done, v0.1.1) Half-Open reacts faster: re-open as soon as the probes already seen make a healthy outcome
   impossible (best case: every remaining probe succeeds), instead of waiting for all probes while
   still sending traffic to a failing dependency. gobreaker re-opens on the first probe failure.
