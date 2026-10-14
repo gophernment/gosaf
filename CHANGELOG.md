@@ -3,7 +3,7 @@
 All notable changes are documented here. Versions follow [Semantic Versioning](https://semver.org/);
 while the major version is 0, the API may change between minor versions.
 
-## [Unreleased]
+## [0.1.1] - 2026-10-14
 
 ### Added
 - `Config.ConsecutiveFailures`: trip after N failures in a row, independent of `MinCalls` (0 disables it).
@@ -29,4 +29,5 @@ First release.
 - `Listener` for state changes and call results, delivered outside the lock.
 - `Snapshot`, `State`, `Reset`.
 
+[0.1.1]: https://github.com/gophernment/gosaf/releases/tag/v0.1.1
 [0.1.0]: https://github.com/gophernment/gosaf/releases/tag/v0.1.0

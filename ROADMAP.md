@@ -31,15 +31,15 @@ with reproducible numbers.
 
 ## v0.1.1 — finish v0.1 (patch)
 
-- Publish the repo, push `main` and `v0.1.0`, confirm CI is green on Linux; enable private
-  vulnerability reporting and Dependabot alerts.
-- (done, unreleased) Half-Open reacts faster: re-open as soon as the probes already seen make a healthy outcome
+- Publish the repo, push `main` and the tags, confirm CI is green on Linux; enable private
+  vulnerability reporting and Dependabot alerts. (open: waiting for the first push)
+- (done, v0.1.1) Half-Open reacts faster: re-open as soon as the probes already seen make a healthy outcome
   impossible (best case: every remaining probe succeeds), instead of waiting for all probes while
   still sending traffic to a failing dependency. gobreaker re-opens on the first probe failure.
-- (done, unreleased) `Config.ConsecutiveFailures`: trip after N failures in a row (independent of `MinCalls`),
+- (done, v0.1.1) `Config.ConsecutiveFailures`: trip after N failures in a row (independent of `MinCalls`),
   covering the common "5 in a row" rule that gobreaker's default `ReadyToTrip` offers.
-- (done, unreleased) Cap `OpenTimeout` and `ProbeTimeout` at `MaxTimeout` (24h) in `Config.validate`.
-- (done, unreleased) Document: `Listener` runs on the caller goroutine and may block it; event ordering across
+- (done, v0.1.1) Cap `OpenTimeout` and `ProbeTimeout` at `MaxTimeout` (24h) in `Config.validate`.
+- (done, v0.1.1) Document: `Listener` runs on the caller goroutine and may block it; event ordering across
   goroutines; `State()`/`Snapshot()` are lazy (Open→Half-Open happens on the next `Allow`);
   `Do` re-panics with the original value.
 - Dropped: wrapping re-panics to keep the stack. A crash already prints the original frames
