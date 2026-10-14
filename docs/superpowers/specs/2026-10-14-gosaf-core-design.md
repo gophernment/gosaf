@@ -39,7 +39,7 @@ Dependencies point inward: `facade → guard → circuit`.
 
 ```
 gosaf.go              facade/wiring: New, Config, DefaultConfig, Breaker, Do[T],
-                      State, Snapshot, Listener, Event, errors
+                      State, Snapshot, Listener, StateChange, CallEvent, errors
 internal/circuit/     DOMAIN, pure: State, Outcome, Window, Policy, Machine
                       no mutex, no time.Now, no goroutines; `now` passed as argument
 internal/guard/       USECASE (DCI context): Allow/Permit/Done, mutex, generation,
@@ -64,7 +64,7 @@ States: Closed, Open, HalfOpen.
   When all probes complete: rates below thresholds → Closed (window reset), else → Open.
   Probe not completed within `ProbeTimeout` → counted as failure, slot reclaimed.
 - **Outcome**: Success, Failure, Slow (success exceeding `SlowCallDuration`), Ignored
-  (ctx error / `IsFailure` excluded; not recorded).
+  (`context.Canceled` by default, or excluded by `IsFailure`; not recorded). `context.DeadlineExceeded` is a Failure: a dependency that hangs until timeout must still trip the breaker.
 - **Generation**: bumped on every transition and window reset; results carrying an old
   generation are discarded.
 - **Panic in fn**: record Failure, release slot via `defer`, re-panic.
@@ -85,7 +85,7 @@ type Config struct {
     OpenTimeout      time.Duration
     HalfOpenMaxCalls int
     ProbeTimeout     time.Duration
-    IsFailure        func(error) bool // default: err != nil && not a ctx error
+    IsFailure        func(error) bool // default: err != nil && !errors.Is(err, context.Canceled)
     Clock            func() time.Time // default time.Now
     Listener         Listener
 }
@@ -93,7 +93,7 @@ func New(Config) (*Breaker, error)
 func DefaultConfig() Config
 ```
 
-Validation (`ErrInvalidConfig`, message names the field): sizes/durations > 0,
+Validation (`ErrInvalidConfig`, message names the field): `1 <= WindowSize <= MaxWindowSize` (100000, bounds memory), durations > 0,
 rates in (0,1] and not NaN, `MinCalls ≤ WindowSize` (count-based), `HalfOpenMaxCalls ≥ 1`.
 
 ## 7. Errors
@@ -121,7 +121,7 @@ No caller payloads or secrets in any error/event.
 
 ## 10. Supply chain / tooling
 
-- `go.mod`: `go 1.27` + `toolchain go1.27.<latest patch>`; bump on each patch release.
+- `go.mod`: `go 1.27.<latest patch>` (the `go` line sets the minimum toolchain); bump on each patch release. Dev tools are pinned in a nested `tools/` module so the root module has zero dependencies.
 - CI: `gofmt -l`, `go vet`, `staticcheck`, `govulncheck ./...`, `go mod verify`,
   `go test -race -shuffle=on ./...`.
 - GitHub Actions pinned by commit SHA; Dependabot/Renovate weekly for Go modules and Actions.
