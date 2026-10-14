@@ -23,16 +23,16 @@ Top-level layout names the use cases, not `utils/`, `models/`, `helpers/`.
 **Onion** — dependencies point inward only:
 
 ```
-adapters  ──▶  usecase  ──▶  domain
+facade    ──▶  usecase  ──▶  domain
 (outer)                      (core, no imports from this repo)
 ```
 
 - `domain`: pure circuit/state rules (states, transitions, counters). No I/O, no `time.Now()`, no goroutines.
 - `usecase` (application): orchestrates a call through the breaker (`Do`). Depends on domain and on ports.
-- `adapters`: implementations of ports (system clock, state-change hook, optional integrations like `net/http` RoundTripper).
+- `facade` (root package): validates `Config`, wires usecase + ports, re-exports the public API. No adapters in v1.
 
-**Hexagonal** — ports are small interfaces defined by the *consumer* (inner layer), implemented by adapters:
-- `Clock` port (inject; fake in tests)
+**Hexagonal** — ports are small interfaces defined by the *consumer* (inner layer), implemented by the caller or the facade:
+- `Clock` port: a plain `func() time.Time` (injected via `Config.Clock`; fake in tests)
 - `Listener` port for state-change events (optional)
 
 **DCI** (Data, Context, Interaction):
@@ -44,18 +44,17 @@ Suggested layout (adjust only with reason; keep the root package as the public f
 
 ```
 gosaf/
-  gosaf.go           # public facade: New, Config, Do, ErrOpen
+  gosaf.go           # facade: New, Breaker, Do[T], re-exported types and errors
+  config.go          # Config, DefaultConfig, validation
   internal/
-    circuit/         # domain: state machine, counters, policy
-    guardedcall/     # usecase/context: run a call through the circuit
-  adapter/
-    clock/           # system clock
-  examples/
+    circuit/         # domain: State, Outcome, Window, Policy, Machine
+    guard/           # usecase: Allow/Permit/Done, mutex, classification, Listener
+  tools/             # separate module pinning staticcheck + govulncheck
 ```
 
 Rules:
 - `internal/` for everything not intentionally public.
-- Domain must not import usecase/adapter. Usecase must not import adapter (only ports).
+- Domain must not import usecase or facade. Usecase must not import facade.
 - Wiring happens in the root facade only.
 
 ## Testing
@@ -75,7 +74,9 @@ Before finishing any change:
 ```sh
 gofmt -l .        # must print nothing
 go vet ./...
-go test -race ./...
+go tool -modfile=tools/go.mod staticcheck ./...
+go tool -modfile=tools/go.mod govulncheck ./...
+go test -race -shuffle=on -count=1 ./...
 ```
 
 Work test-first when adding behavior or fixing a bug (red → green → refactor).
@@ -106,7 +107,7 @@ Work test-first when adding behavior or fixing a bug (red → green → refactor
 ## Agent Workflow
 
 1. Check change fits README scope. If not, ask before adding.
-2. Pick the layer first (domain / usecase / adapter), then write the test, then code.
+2. Pick the layer first (domain / usecase / facade), then write the test, then code.
 3. Smallest diff that passes. No drive-by refactors.
 4. Run the checks in **Testing** and report real output.
 5. Update README when public API or scope changes.

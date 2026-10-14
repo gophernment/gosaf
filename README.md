@@ -13,7 +13,7 @@ GoSaf ตัดวงจรเร็ว (fail fast), ให้ dependency พั
 
 ## States
 
-```
+```text
         failures >= threshold
  Closed ───────────────────────▶ Open
    ▲                               │
@@ -29,28 +29,37 @@ GoSaf ตัดวงจรเร็ว (fail fast), ให้ dependency พั
 | Open      | reject ทันที ด้วย `ErrOpen`, ไม่เรียก dependency      |
 | Half-Open | ปล่อย probe จำนวนจำกัด; สำเร็จ → Closed, พลาด → Open |
 
-## Planned API (sketch)
+## Usage
 
 ```go
-cb := gosaf.New(gosaf.Config{
-    FailureThreshold: 5,
-    OpenTimeout:      30 * time.Second,
-    HalfOpenMaxCalls: 1,
-})
+cb, err := gosaf.New(gosaf.DefaultConfig())
+if err != nil {
+    return err // invalid config is rejected, never silently fixed
+}
 
-err := cb.Do(ctx, func(ctx context.Context) error {
+res, err := gosaf.Do(ctx, cb, func(ctx context.Context) (string, error) {
     return callPaymentAPI(ctx)
 })
-if errors.Is(err, gosaf.ErrOpen) {
-    // fail fast / fallback
+switch {
+case errors.Is(err, gosaf.ErrOpen), errors.Is(err, gosaf.ErrHalfOpenFull):
+    // fail fast or fall back; errors.As to *gosaf.RejectedError gives RetryAfter
+case err != nil:
+    // the call itself failed
 }
 ```
+
+Tune behaviour through `gosaf.Config`: sliding window (count- or time-based), failure rate,
+slow-call rate, open timeout, half-open probes and probe timeout. `IsFailure` excludes errors
+(for example "not found") from the statistics; `context.Canceled` is excluded by default.
+A `Listener` receives state changes and call results.
 
 ## Scope
 
 In:
 - Closed / Open / Half-Open state machine
-- Failure threshold, open timeout, half-open probes
+- Failure-rate and slow-call-rate tripping over a sliding window
+- Open timeout, half-open probes with probe timeout
+- Panic-safe, idempotent two-step API (`Allow` / `Permit.Done`)
 - `context.Context` support
 - Injectable clock (testable)
 - State change hook (observability)
@@ -62,8 +71,11 @@ Out (YAGNI, จนกว่าจะมีเหตุผลจริง):
 ## Development
 
 ```sh
-go test -race ./...
+gofmt -l .
 go vet ./...
+go tool -modfile=tools/go.mod staticcheck ./...
+go tool -modfile=tools/go.mod govulncheck ./...
+go test -race -shuffle=on -count=1 ./...
 ```
 
 ดูหลักการออกแบบและกฎการเขียนโค้ดที่ [AGENTS.md](AGENTS.md).
