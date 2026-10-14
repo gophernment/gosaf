@@ -38,11 +38,12 @@ with reproducible numbers.
   still sending traffic to a failing dependency. gobreaker re-opens on the first probe failure.
 - (done, unreleased) `Config.ConsecutiveFailures`: trip after N failures in a row (independent of `MinCalls`),
   covering the common "5 in a row" rule that gobreaker's default `ReadyToTrip` offers.
-- Cap `OpenTimeout` in `Config.validate` (Duration overflow guard).
-- Document: `Listener` runs on the caller goroutine and may block it; event ordering across
+- (done, unreleased) Cap `OpenTimeout` and `ProbeTimeout` at `MaxTimeout` (24h) in `Config.validate`.
+- (done, unreleased) Document: `Listener` runs on the caller goroutine and may block it; event ordering across
   goroutines; `State()`/`Snapshot()` are lazy (Open→Half-Open happens on the next `Allow`);
   `Do` re-panics with the original value.
-- Re-panic keeps the original stack where possible (wrap in a type that carries it).
+- Dropped: wrapping re-panics to keep the stack. A crash already prints the original frames
+  (`panic: X [recovered, repanicked]`), and wrapping would change the value `recover` returns.
 
 ## v0.2 — prove it, make it operable (minor)
 

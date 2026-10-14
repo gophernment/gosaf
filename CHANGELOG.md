@@ -9,6 +9,8 @@ while the major version is 0, the API may change between minor versions.
 - `Config.ConsecutiveFailures`: trip after N failures in a row, independent of `MinCalls` (0 disables it).
 
 ### Changed
+- `OpenTimeout` and `ProbeTimeout` must not exceed `MaxTimeout` (24h); larger values are rejected by `New`.
+- Documented `Listener` execution and ordering, lazy `State`/`Snapshot`, and the panic re-raise contract.
 - Half-Open re-opens as soon as the probes seen so far make recovery impossible, instead of waiting
   for every probe to finish.
 

@@ -10,6 +10,11 @@ import (
 // MaxWindowSize bounds Config.WindowSize so memory use stays fixed and small.
 const MaxWindowSize = 100_000
 
+// MaxTimeout bounds Config.OpenTimeout and Config.ProbeTimeout. A circuit that
+// stays open or waits on a probe for longer than a day is almost certainly a
+// misconfiguration, and the bound keeps duration arithmetic far from overflow.
+const MaxTimeout = 24 * time.Hour
+
 // ErrInvalidConfig is wrapped by every error New returns for a bad Config.
 var ErrInvalidConfig = errors.New("gosaf: invalid config")
 
@@ -40,12 +45,12 @@ type Config struct {
 	// SlowCallRate in (0,1]: trip when slow/calls reaches it.
 	SlowCallRate float64
 
-	// OpenTimeout is how long the circuit stays Open before probing.
+	// OpenTimeout is how long the circuit stays Open before probing. At most MaxTimeout.
 	OpenTimeout time.Duration
 	// HalfOpenMaxCalls is the number of probe calls allowed in Half-Open.
 	HalfOpenMaxCalls int
 	// ProbeTimeout is how long a probe may run before it counts as hung and
-	// the circuit re-opens.
+	// the circuit re-opens. At most MaxTimeout.
 	ProbeTimeout time.Duration
 
 	// IsFailure classifies an error. Return false to exclude it from the
@@ -92,12 +97,12 @@ func (c Config) validate() error {
 		return invalid("SlowCallRate", "must be in (0, 1]")
 	case c.SlowCallDuration <= 0:
 		return invalid("SlowCallDuration", "must be positive")
-	case c.OpenTimeout <= 0:
-		return invalid("OpenTimeout", "must be positive")
+	case c.OpenTimeout <= 0 || c.OpenTimeout > MaxTimeout:
+		return invalid("OpenTimeout", "must be in (0, %s]", MaxTimeout)
 	case c.HalfOpenMaxCalls < 1:
 		return invalid("HalfOpenMaxCalls", "must be at least 1")
-	case c.ProbeTimeout <= 0:
-		return invalid("ProbeTimeout", "must be positive")
+	case c.ProbeTimeout <= 0 || c.ProbeTimeout > MaxTimeout:
+		return invalid("ProbeTimeout", "must be in (0, %s]", MaxTimeout)
 	}
 	return nil
 }

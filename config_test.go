@@ -41,6 +41,8 @@ func TestNewRejectsInvalidConfig(t *testing.T) {
 		{"SlowCallRate", func(c *gosaf.Config) { c.SlowCallRate = -0.1 }},
 		{"SlowCallDuration", func(c *gosaf.Config) { c.SlowCallDuration = 0 }},
 		{"OpenTimeout", func(c *gosaf.Config) { c.OpenTimeout = 0 }},
+		{"OpenTimeout", func(c *gosaf.Config) { c.OpenTimeout = gosaf.MaxTimeout + 1 }},
+		{"ProbeTimeout", func(c *gosaf.Config) { c.ProbeTimeout = gosaf.MaxTimeout + 1 }},
 		{"HalfOpenMaxCalls", func(c *gosaf.Config) { c.HalfOpenMaxCalls = 0 }},
 		{"ProbeTimeout", func(c *gosaf.Config) { c.ProbeTimeout = -1 }},
 	}
@@ -59,6 +61,15 @@ func TestNewRejectsInvalidConfig(t *testing.T) {
 				t.Fatal("Breaker must be nil on error")
 			}
 		})
+	}
+}
+
+func TestTimeoutsAtMaxTimeoutAreAccepted(t *testing.T) {
+	cfg := gosaf.DefaultConfig()
+	cfg.OpenTimeout = gosaf.MaxTimeout
+	cfg.ProbeTimeout = gosaf.MaxTimeout
+	if _, err := gosaf.New(cfg); err != nil {
+		t.Fatalf("MaxTimeout rejected: %v", err)
 	}
 }
 

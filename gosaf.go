@@ -33,7 +33,11 @@ type (
 	StateChange = guard.StateChange
 	// CallEvent is delivered to Listener.OnCall.
 	CallEvent = guard.CallEvent
-	// Listener observes a Breaker.
+	// Listener observes a Breaker. Methods run on the goroutine that caused the
+	// event, after the breaker's lock is released: a slow Listener slows that
+	// caller, but it may safely call back into the breaker. Events from different
+	// goroutines can arrive out of order (use StateChange.At). A panic in a
+	// method is recovered and dropped.
 	Listener = guard.Listener
 	// Permit is the right to make one call; report the result with Done.
 	Permit = guard.Permit
@@ -122,6 +126,11 @@ func (b *Breaker) Allow(ctx context.Context) (*Permit, error) {
 
 // Snapshot returns a copy of the current state and counts. A zero Breaker
 // returns a zero Snapshot.
+//
+// The state is the stored one and changes lazily, on the next Allow: an Open
+// circuit becomes HalfOpen only when a call arrives after OpenTimeout, and a
+// probe that never finished re-opens the circuit only when a call arrives after
+// ProbeTimeout. Until then Snapshot and State keep reporting the old state.
 func (b *Breaker) Snapshot() Snapshot {
 	if b == nil || b.g == nil {
 		return Snapshot{}
@@ -129,8 +138,7 @@ func (b *Breaker) Snapshot() Snapshot {
 	return b.g.Snapshot()
 }
 
-// State returns the current state. An Open breaker reports Open until the next
-// call after OpenTimeout moves it to HalfOpen.
+// State returns the stored state; see Snapshot for when it changes.
 func (b *Breaker) State() State { return b.Snapshot().State }
 
 // Reset closes the circuit, clears its statistics and discards the results of
@@ -144,7 +152,8 @@ func (b *Breaker) Reset() {
 
 // Do runs fn through the breaker. It returns a *RejectedError without calling
 // fn when the circuit refuses, and ctx.Err() when ctx is already done.
-// A panic in fn is recorded as a failure and then re-raised.
+// A panic in fn is recorded as a failure and then re-raised with the original
+// value, so recover returns exactly what fn panicked with.
 func Do[T any](ctx context.Context, b *Breaker, fn func(context.Context) (T, error)) (res T, err error) {
 	p, err := b.Allow(ctx)
 	if err != nil {
