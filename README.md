@@ -78,7 +78,7 @@ go tool -modfile=tools/go.mod govulncheck ./...
 go test -race -shuffle=on -count=1 ./...
 ```
 
-ดูหลักการออกแบบและกฎการเขียนโค้ดที่ [AGENTS.md](AGENTS.md).
+ดูหลักการออกแบบและกฎการเขียนโค้ดที่ [AGENTS.md](AGENTS.md). แผนงานอยู่ที่ [ROADMAP.md](ROADMAP.md).
 
 ## License
 
