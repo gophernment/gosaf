@@ -56,7 +56,8 @@ type Config struct {
 	// IsFailure classifies an error. Return false to exclude it from the
 	// statistics. Default: every error except context.Canceled is a failure.
 	IsFailure func(error) bool
-	// Clock replaces time.Now, mainly for tests.
+	// Clock replaces the clock used for all timing decisions, mainly for tests.
+	// The default reads only the monotonic clock, which is cheaper than time.Now.
 	Clock func() time.Time
 	// Listener receives state changes and call results. Optional.
 	Listener Listener
