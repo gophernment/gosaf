@@ -83,6 +83,7 @@ when the call ends. It is safe to call more than once.
 - `cb.ForceOpen()` rejects every call until `cb.Reset()`. Use it to shed load during an incident.
 - `cb.Disable()` turns the breaker into a pass-through until `cb.Reset()`. It removes protection, so use it only if the breaker itself is the problem.
 - Implement `gosaf.RejectListener` on your `Listener` to be told about every rejected call.
+- `Disable` and `ForceOpen` on an already open circuit do not notify the `Listener`; read `Snapshot().Mode`.
 - `gosafslog.NewListener(logger)` logs state changes, calls and rejections with `log/slog`.
 
 ## What is included

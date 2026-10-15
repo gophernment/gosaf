@@ -3,7 +3,7 @@
 Every release follows this checklist, in order. Do not tag until every box is ticked.
 
 1. **Changelog.** Move the `[Unreleased]` entries in `CHANGELOG.md` under a new
-   `## [X.Y.Z] - YYYY-MM-DD` heading and add the compare link at the bottom. The release
+   `## [X.Y.Z] - YYYY-MM-DD` heading and add its release link at the bottom (`[X.Y.Z]: https://github.com/gophernment/gosaf/releases/tag/vX.Y.Z`). The release
    workflow publishes exactly that section as the release notes and fails if it is missing.
 2. **Checks.** On the commit to be released:
 

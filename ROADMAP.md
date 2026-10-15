@@ -57,7 +57,7 @@ with reproducible numbers.
   - Gate: hot path no slower and no more allocations than gobreaker's `Execute`; if the
     `Permit` allocation is the cost, add a non-allocating path before shipping.
 - **Operations** (done, v0.2; `ForceClose` dropped because `Reset` already closes)
-  - `ForceOpen()` / `ForceClose()` / `Disable()` for incidents (explicit, logged via `Listener`).
+  - `ForceOpen()` / `ForceClose()` / `Disable()` for incidents (explicit; visible through `Snapshot().Mode`. `Disable` and `ForceOpen` on an open circuit emit no Listener event yet).
   - `Listener.OnReject` (or a `Rejected` call event) so shed load is visible.
   - `Snapshot` additions: time of last transition, `RetryAfter`, rejected count.
   - `log/slog` helper that implements `Listener` (stdlib only).
