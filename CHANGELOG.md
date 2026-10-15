@@ -3,6 +3,20 @@
 All notable changes are documented here. Versions follow [Semantic Versioning](https://semver.org/);
 while the major version is 0, the API may change between minor versions.
 
+## [Unreleased]
+
+### Added
+- `Breaker.ForceOpen()` and `Breaker.Disable()`; both end with `Reset()`. `Snapshot` now reports `Mode`, `Rejected` and `LastChange`.
+- `RejectListener`: an optional extension of `Listener` with `OnReject`, called for every rejected call.
+- `gosafslog`: a `log/slog` listener (never logs error text).
+- `bench/` module and `bench/gate`: GoSaf vs gobreaker benchmarks used as a release gate.
+- Oracle-based tests, invariant tests, `FuzzMachine` and `testing/synctest` tests.
+- Release workflow, OpenSSF Scorecard workflow and `RELEASING.md`.
+
+### Changed
+- **Breaking:** `RejectedError` fields are now methods: `State()`, `RetryAt()` and `RetryAfter()`. The same immutable value is shared between callers.
+- The hot paths no longer allocate. The default clock reads only the monotonic clock. An Open circuit rejects calls without taking the lock.
+
 ## [0.1.1] - 2026-10-14
 
 ### Added

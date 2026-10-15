@@ -26,4 +26,27 @@ jobs:
       - run: go mod verify
       - run: go test -race -shuffle=on -count=1 ./...
       - name: fuzz smoke
-        run: go test -run='^$' -fuzz=FuzzNew -fuzztime=10s .
+        run: |
+          go test -run='^$' -fuzz=FuzzNew -fuzztime=10s .
+          go test -run='^$' -fuzz=FuzzMachine -fuzztime=10s ./internal/circuit
+      - name: bench module builds and its gate logic is tested
+        working-directory: bench
+        run: |
+          go vet ./...
+          go test -count=1 ./gate/
+
+  # Informational: shared runners are too noisy to fail a build on timings.
+  # The real gate is `cd bench && go run ./gate`, run before every release.
+  bench:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: GoSaf vs gobreaker
+        working-directory: bench
+        run: go run ./gate
