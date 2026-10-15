@@ -18,13 +18,13 @@ dependency ships as a **separate module** so the core stays dependency-free.
 | Trip policy | consecutive failures; ratios are DIY | failure rate + slow-call rate + `MinCalls` (v0.1) + consecutive failures | v0.1.1 |
 | Stuck Half-Open | skipped/duplicate `done` can stall it | idempotent `Done`, probe timeout, panic/`Goexit` safe (v0.1); early re-open when recovery is impossible | v0.1.1 |
 | Config | zero values silently defaulted | validated, fail closed | done (v0.1) |
-| Correctness proof | example tests | model-based + property tests, race stress, fuzz | v0.2 |
-| Performance | baseline | `ns/op` and `allocs/op` no worse on the hot path | v0.2 (not yet measured) |
+| Correctness proof | example tests | oracle + invariant tests, race stress, fuzz | done (v0.2) |
+| Performance | baseline | `ns/op` and `allocs/op` no worse on the hot path | done (v0.2): see bench/gate |
 | Recovery behaviour | fixed open timeout | backoff with jitter, gradual ramp-up | v0.3 |
-| Observability | `OnStateChange` only | rejects, events, `slog`, OpenTelemetry/Prometheus | v0.2–v0.3 |
+| Observability | `OnStateChange` only | rejects, events, `slog` (done, v0.2), OpenTelemetry/Prometheus | v0.3 |
 | Integrations | none in core | `net/http`, gRPC, as adapters | v0.3 |
 | Shared state | separate distributed type | `Store` port + reference adapter | v0.4 |
-| Supply chain | — | signed tags, provenance, vuln-checked releases, OpenSSF Scorecard | v0.2–v1.0 |
+| Supply chain | — | signed tags, vuln-checked releases, OpenSSF Scorecard (workflows done, v0.2; first signed tag pending) | v0.2–v1.0 |
 
 Do not claim "faster" or "better" anywhere in the docs until the matching gate below is met
 with reproducible numbers.
@@ -47,7 +47,7 @@ with reproducible numbers.
 
 ## v0.2 — prove it, make it operable (minor)
 
-- **Evidence**
+- **Evidence** (done, v0.2)
   - Benchmarks (`ns/op`, `allocs/op`, parallel) for `Do` on Closed/Open paths; a comparison
     harness against gobreaker kept in a separate `bench/` module so the core has no dependency.
   - Model-based test: a tiny reference implementation vs `Machine` over random operation
@@ -56,12 +56,12 @@ with reproducible numbers.
   - Fuzz `Machine` operation sequences, not only `Config`.
   - Gate: hot path no slower and no more allocations than gobreaker's `Execute`; if the
     `Permit` allocation is the cost, add a non-allocating path before shipping.
-- **Operations**
-  - `ForceOpen()` / `ForceClose()` / `Disable()` for incidents (explicit, logged via `Listener`).
+- **Operations** (done, v0.2; `ForceClose` dropped because `Reset` already closes)
+  - `ForceOpen()` / `ForceClose()` / `Disable()` for incidents (explicit; visible through `Snapshot().Mode`. `Disable` and `ForceOpen` on an open circuit emit no Listener event yet).
   - `Listener.OnReject` (or a `Rejected` call event) so shed load is visible.
   - `Snapshot` additions: time of last transition, `RetryAfter`, rejected count.
   - `log/slog` helper that implements `Listener` (stdlib only).
-- **Supply chain**: signed tags, release workflow with provenance attestation, Scorecard in CI.
+- **Supply chain**: release workflow and Scorecard (done, v0.2); signed tags (open until the owner tags v0.2.0). Provenance attestation dropped: a pure Go library has no build artifact.
 
 ## v0.3 — smarter recovery, integrations (minor)
 

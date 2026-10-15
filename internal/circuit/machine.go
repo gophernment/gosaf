@@ -10,6 +10,29 @@ type MachineConfig struct {
 	ProbeTimeout     time.Duration
 }
 
+// Mode is an operator override of the normal state machine.
+type Mode int
+
+// Modes. Anything other than ModeNormal is explicit and lasts until Reset.
+const (
+	ModeNormal     Mode = iota
+	ModeForcedOpen      // every call is rejected; no automatic Half-Open
+	ModeDisabled        // every call is admitted and nothing is recorded
+)
+
+func (m Mode) String() string {
+	switch m {
+	case ModeNormal:
+		return "normal"
+	case ModeForcedOpen:
+		return "forced-open"
+	case ModeDisabled:
+		return "disabled"
+	default:
+		return "unknown"
+	}
+}
+
 // Transition describes a state change.
 type Transition struct {
 	From, To State
@@ -27,9 +50,11 @@ const (
 
 // Admission is the result of Machine.Admit.
 type Admission struct {
-	Gen        uint64 // pass back to Record; identifies the admitting generation
-	Reject     Reject
-	RetryAfter time.Duration // valid when Reject != Admitted; always >= 0
+	Gen    uint64 // pass back to Record; identifies the admitting generation
+	Reject Reject
+	// RetryAt is when a rejected caller may try again. It is the zero time when
+	// no retry is scheduled (ModeForcedOpen). Valid when Reject != Admitted.
+	RetryAt time.Time
 }
 
 type probes struct {
@@ -46,6 +71,7 @@ type Machine struct {
 	cfg      MachineConfig
 	win      Window
 	state    State
+	mode     Mode
 	gen      uint64
 	openedAt time.Time
 	half     probes
@@ -59,11 +85,18 @@ func NewMachine(cfg MachineConfig, win Window) *Machine {
 
 // Admit decides whether a call may run now.
 func (m *Machine) Admit(now time.Time) (Admission, []Transition) {
+	switch m.mode {
+	case ModeDisabled:
+		return Admission{Gen: m.gen}, nil
+	case ModeForcedOpen:
+		return Admission{Reject: RejectedOpen}, nil
+	}
+
 	var ts []Transition
 	if m.state == Open && now.Before(m.openedAt) {
 		m.openedAt = now // clock stepped back: restart the wait instead of sticking
 	}
-	if m.state == Open && m.openRemaining(now) == 0 {
+	if m.state == Open && !now.Before(m.openedAt.Add(m.cfg.OpenTimeout)) {
 		ts = append(ts, m.enter(HalfOpen, now))
 	}
 	if m.state == HalfOpen && m.half.pending > 0 &&
@@ -77,12 +110,11 @@ func (m *Machine) Admit(now time.Time) (Admission, []Transition) {
 	case Closed:
 		return Admission{Gen: m.gen}, ts
 	case Open:
-		return Admission{Reject: RejectedOpen, RetryAfter: m.openRemaining(now)}, ts
+		return Admission{Reject: RejectedOpen, RetryAt: m.openedAt.Add(m.cfg.OpenTimeout)}, ts
 	}
 
 	if m.half.admitted >= m.cfg.HalfOpenMaxCalls {
-		wait := min(max(m.half.deadline.Sub(now), 0), m.cfg.ProbeTimeout)
-		return Admission{Reject: RejectedHalfOpenFull, RetryAfter: wait}, ts
+		return Admission{Reject: RejectedHalfOpenFull, RetryAt: m.half.deadline}, ts
 	}
 	if m.half.pending == 0 {
 		m.half.deadline = now.Add(m.cfg.ProbeTimeout)
@@ -95,7 +127,7 @@ func (m *Machine) Admit(now time.Time) (Admission, []Transition) {
 // Record reports the outcome of a call admitted under generation gen.
 // Results from an older generation are dropped.
 func (m *Machine) Record(now time.Time, gen uint64, o Outcome) []Transition {
-	if gen != m.gen {
+	if gen != m.gen || m.mode == ModeDisabled {
 		return nil
 	}
 	switch m.state {
@@ -135,9 +167,10 @@ func (m *Machine) Record(now time.Time, gen uint64, o Outcome) []Transition {
 	return nil
 }
 
-// Reset forces the machine to Closed with an empty window and drops all
-// in-flight results.
+// Reset returns the machine to ModeNormal and Closed with an empty window,
+// and drops all in-flight results.
 func (m *Machine) Reset(now time.Time) []Transition {
+	m.mode = ModeNormal
 	from := m.state
 	t := m.enter(Closed, now)
 	if from == Closed {
@@ -145,6 +178,49 @@ func (m *Machine) Reset(now time.Time) []Transition {
 	}
 	return []Transition{t}
 }
+
+// SetMode applies an operator override. ModeNormal is the same as Reset.
+// ModeForcedOpen moves the machine to Open and keeps it there. ModeDisabled
+// keeps the state but stops admitting-with-recording. In every case in-flight
+// results are dropped.
+func (m *Machine) SetMode(now time.Time, mode Mode) []Transition {
+	switch mode {
+	case ModeForcedOpen:
+		m.mode = mode
+		from := m.state
+		t := m.enter(Open, now)
+		if from == Open {
+			return nil
+		}
+		return []Transition{t}
+	case ModeDisabled:
+		m.mode = mode
+		m.gen++
+		m.half = probes{}
+		m.consec = 0
+		return nil
+	default:
+		return m.Reset(now)
+	}
+}
+
+// RejectWindow describes a period in which every call is rejected the same way
+// without changing any state, so callers may reject without locking. While the
+// machine is forced open, forever is true and the times are zero. While it is
+// Open in normal mode, calls with from <= now < until are rejected with
+// RetryAt = until. ok is false in every other situation.
+func (m *Machine) RejectWindow() (from, until time.Time, forever, ok bool) {
+	switch {
+	case m.mode == ModeForcedOpen:
+		return time.Time{}, time.Time{}, true, true
+	case m.mode == ModeNormal && m.state == Open:
+		return m.openedAt, m.openedAt.Add(m.cfg.OpenTimeout), false, true
+	}
+	return time.Time{}, time.Time{}, false, false
+}
+
+// Mode returns the current operator override.
+func (m *Machine) Mode() Mode { return m.mode }
 
 // Snapshot returns the stored state and the counts that drive it.
 // An Open machine moves to HalfOpen lazily, on the next Admit.
@@ -168,14 +244,4 @@ func (m *Machine) enter(to State, now time.Time) Transition {
 		m.win.Reset()
 	}
 	return t
-}
-
-// openRemaining is how long until an Open circuit may probe, within
-// [0, OpenTimeout] even if the clock steps backwards.
-func (m *Machine) openRemaining(now time.Time) time.Duration {
-	elapsed := now.Sub(m.openedAt)
-	if elapsed < 0 {
-		return m.cfg.OpenTimeout // avoids Duration overflow in the subtraction below
-	}
-	return max(m.cfg.OpenTimeout-elapsed, 0)
 }

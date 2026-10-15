@@ -90,23 +90,24 @@ func TestIgnoredNeverCounts(t *testing.T) {
 	}
 }
 
-func TestOpenRejectsWithRetryAfter(t *testing.T) {
+func TestOpenRejectsWithRetryAt(t *testing.T) {
 	m := newMachine(2)
 	tripOpen(t, m, t0)
 
 	adm, _ := m.Admit(t0.Add(4 * time.Second))
-	if adm.Reject != circuit.RejectedOpen || adm.RetryAfter != 6*time.Second {
-		t.Fatalf("admission = %+v, want RejectedOpen retry 6s", adm)
+	if adm.Reject != circuit.RejectedOpen || !adm.RetryAt.Equal(t0.Add(openTimeout)) {
+		t.Fatalf("admission = %+v, want RejectedOpen with RetryAt %v", adm, t0.Add(openTimeout))
 	}
 }
 
-func TestRetryAfterStaysInRangeWhenClockGoesBackwards(t *testing.T) {
+func TestRetryAtIsNeverMoreThanOpenTimeoutAheadWhenClockGoesBackwards(t *testing.T) {
 	m := newMachine(2)
 	tripOpen(t, m, t0)
 
-	adm, _ := m.Admit(t0.Add(-time.Hour))
-	if adm.RetryAfter < 0 || adm.RetryAfter > openTimeout {
-		t.Fatalf("RetryAfter = %v, want within [0, %v]", adm.RetryAfter, openTimeout)
+	now := t0.Add(-time.Hour)
+	adm, _ := m.Admit(now)
+	if adm.RetryAt.Before(now) || adm.RetryAt.After(now.Add(openTimeout)) {
+		t.Fatalf("RetryAt = %v, want within [%v, %v]", adm.RetryAt, now, now.Add(openTimeout))
 	}
 }
 
@@ -242,7 +243,7 @@ func TestOpenDoesNotStickWhenClockGoesBackwards(t *testing.T) {
 
 	back := t0.Add(-time.Hour)
 	adm, _ := m.Admit(back)
-	if adm.Reject != circuit.RejectedOpen || adm.RetryAfter != openTimeout {
+	if adm.Reject != circuit.RejectedOpen || !adm.RetryAt.Equal(back.Add(openTimeout)) {
 		t.Fatalf("admission = %+v, want RejectedOpen with a fresh full wait", adm)
 	}
 	if adm, _ := m.Admit(back.Add(openTimeout)); adm.Reject != circuit.Admitted {
@@ -314,5 +315,66 @@ func TestConsecutiveCounterRestartsAfterReset(t *testing.T) {
 	call(t, m, t0, circuit.Failure)
 	if got := state(m, t0); got != circuit.Closed {
 		t.Fatalf("state = %v, want closed: failures before Reset must not count", got)
+	}
+}
+
+func TestForceOpenRejectsWithoutRetryTimeAndNeverRecovers(t *testing.T) {
+	m := newMachine(2)
+	ts := m.SetMode(t0, circuit.ModeForcedOpen)
+	if len(ts) != 1 || ts[0] != (circuit.Transition{From: circuit.Closed, To: circuit.Open}) {
+		t.Fatalf("transitions = %+v, want closed->open", ts)
+	}
+
+	adm, ts := m.Admit(t0.Add(100 * openTimeout))
+	if adm.Reject != circuit.RejectedOpen || !adm.RetryAt.IsZero() || ts != nil {
+		t.Fatalf("got %+v %+v, want rejected with no retry time and no transition", adm, ts)
+	}
+	if got := state(m, t0); got != circuit.Open || m.Mode() != circuit.ModeForcedOpen {
+		t.Fatalf("state = %v, mode = %v, want open, forced-open", got, m.Mode())
+	}
+}
+
+func TestForceOpenWhenAlreadyOpenReportsNoTransition(t *testing.T) {
+	m := newMachine(2)
+	tripOpen(t, m, t0)
+	if ts := m.SetMode(t0, circuit.ModeForcedOpen); ts != nil {
+		t.Fatalf("transitions = %+v, want none", ts)
+	}
+}
+
+func TestDisabledAdmitsEverythingAndRecordsNothing(t *testing.T) {
+	m := newMachine(2)
+	m.SetMode(t0, circuit.ModeDisabled)
+	for range 20 {
+		call(t, m, t0, circuit.Failure)
+	}
+	if s, c := m.Snapshot(t0); s != circuit.Closed || c.Total != 0 {
+		t.Fatalf("state = %v, counts = %+v, want closed and nothing recorded", s, c)
+	}
+}
+
+func TestResetEndsForcedModes(t *testing.T) {
+	for _, mode := range []circuit.Mode{circuit.ModeForcedOpen, circuit.ModeDisabled} {
+		t.Run(mode.String(), func(t *testing.T) {
+			m := newMachine(2)
+			m.SetMode(t0, mode)
+			m.Reset(t0)
+			if m.Mode() != circuit.ModeNormal || state(m, t0) != circuit.Closed {
+				t.Fatalf("mode = %v, state = %v, want normal, closed", m.Mode(), state(m, t0))
+			}
+			call(t, m, t0, circuit.Success)
+		})
+	}
+}
+
+func TestModeChangeDropsInFlightResults(t *testing.T) {
+	m := newMachine(2)
+	inflight, _ := m.Admit(t0)
+	m.SetMode(t0, circuit.ModeDisabled)
+	m.SetMode(t0, circuit.ModeNormal)
+
+	m.Record(t0, inflight.Gen, circuit.Failure)
+	if _, c := m.Snapshot(t0); c.Total != 0 {
+		t.Fatalf("in-flight result counted after mode change: %+v", c)
 	}
 }

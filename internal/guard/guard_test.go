@@ -106,8 +106,9 @@ func TestAllowRejectsWhenOpen(t *testing.T) {
 		t.Fatalf("err = %v, want ErrOpen", err)
 	}
 	var rej *guard.RejectedError
-	if !errors.As(err, &rej) || rej.RetryAfter != 6*time.Second || rej.State != circuit.Open {
-		t.Fatalf("rejected = %+v, want open, retry after 6s", rej)
+	if !errors.As(err, &rej) || rej.State() != circuit.Open ||
+		!rej.RetryAt().Equal(clk.Now().Add(6*time.Second)) {
+		t.Fatalf("rejected = %+v, want open with RetryAt 6s ahead", rej)
 	}
 	if errors.Is(err, guard.ErrHalfOpenFull) {
 		t.Fatal("open rejection must not match ErrHalfOpenFull")
@@ -239,13 +240,14 @@ func TestHungProbeIsReclaimed(t *testing.T) {
 
 func TestListenerSeesTransitionsAndCalls(t *testing.T) {
 	rec := &recorder{}
-	g, _ := newGuard(t, 1, func(o *guard.Options) { o.Listener = rec; o.Name = "db" })
+	g, clk := newGuard(t, 1, func(o *guard.Options) { o.Listener = rec; o.Name = "db" })
 	fail(t, g, 2)
 
 	states := rec.stateChanges()
 	if len(states) != 1 || states[0].Name != "db" ||
-		states[0].From != circuit.Closed || states[0].To != circuit.Open {
-		t.Fatalf("states = %+v, want one closed->open for db", states)
+		states[0].From != circuit.Closed || states[0].To != circuit.Open ||
+		!states[0].At.Equal(clk.Now()) {
+		t.Fatalf("states = %+v, want one closed->open for db at the clock time", states)
 	}
 	if len(rec.calls) != 2 || rec.calls[0].Outcome != circuit.Failure {
 		t.Fatalf("calls = %+v, want two failures", rec.calls)
@@ -304,4 +306,197 @@ func TestCustomIsFailure(t *testing.T) {
 func TestZeroValuePermitDoneIsSafe(t *testing.T) {
 	var p guard.Permit
 	p.Done(errBoom) // must not panic
+}
+
+type rejectRecorder struct {
+	recorder
+	rejects []guard.RejectEvent
+}
+
+func (r *rejectRecorder) OnReject(ev guard.RejectEvent) { r.rejects = append(r.rejects, ev) }
+
+func TestRejectionErrorIsSharedWhileRetryTimeIsUnchanged(t *testing.T) {
+	g, clk := newGuard(t, 1, nil)
+	fail(t, g, 2)
+
+	_, first := g.Allow(context.Background())
+	clk.Advance(time.Second)
+	_, second := g.Allow(context.Background())
+	if first == nil || first != second {
+		t.Fatalf("rejections %p and %p should be the same shared value", first, second)
+	}
+
+	g.Reset()
+	fail(t, g, 2) // re-open at a later time: new retry time
+	_, third := g.Allow(context.Background())
+	if third == first {
+		t.Fatal("a new Open period must produce a new rejection value")
+	}
+}
+
+func TestSnapshotReportsRejectedCountAndLastChange(t *testing.T) {
+	g, clk := newGuard(t, 1, nil)
+	if s := g.Snapshot(); s.Rejected != 0 || !s.LastChange.IsZero() {
+		t.Fatalf("fresh snapshot = %+v, want no rejections and no change", s)
+	}
+	fail(t, g, 2)
+	openedAt := clk.Now()
+	clk.Advance(time.Second)
+	g.Allow(context.Background())
+	g.Allow(context.Background())
+
+	s := g.Snapshot()
+	if s.Rejected != 2 || !s.LastChange.Equal(openedAt) || s.State != circuit.Open {
+		t.Fatalf("snapshot = %+v, want 2 rejected, last change %v, open", s, openedAt)
+	}
+}
+
+func TestRejectListenerIsCalledOnlyWhenImplemented(t *testing.T) {
+	rec := &rejectRecorder{}
+	g, _ := newGuard(t, 1, func(o *guard.Options) { o.Listener = rec; o.Name = "db" })
+	fail(t, g, 2)
+	g.Allow(context.Background())
+	if len(rec.rejects) != 1 || rec.rejects[0] != (guard.RejectEvent{Name: "db", State: circuit.Open}) {
+		t.Fatalf("rejects = %+v, want one open rejection for db", rec.rejects)
+	}
+
+	plain := &recorder{}
+	g2, _ := newGuard(t, 1, func(o *guard.Options) { o.Listener = plain })
+	fail(t, g2, 2)
+	g2.Allow(context.Background()) // must not panic without OnReject
+}
+
+func TestForcedOpenRejectsWithoutRetryTimeUntilReset(t *testing.T) {
+	g, clk := newGuard(t, 1, nil)
+	g.SetMode(circuit.ModeForcedOpen)
+	clk.Advance(100 * openTimeout)
+
+	_, err := g.Allow(context.Background())
+	var rej *guard.RejectedError
+	if !errors.Is(err, guard.ErrOpen) || !errors.As(err, &rej) || !rej.RetryAt().IsZero() || rej.RetryAfter() != 0 {
+		t.Fatalf("err = %v, want ErrOpen with no retry time", err)
+	}
+	if s := g.Snapshot(); s.Mode != circuit.ModeForcedOpen || s.State != circuit.Open {
+		t.Fatalf("snapshot = %+v, want forced-open", s)
+	}
+
+	g.SetMode(circuit.ModeNormal)
+	mustAllow(t, g).Done(nil)
+}
+
+func TestDisabledPassesEverythingThroughUnrecorded(t *testing.T) {
+	g, _ := newGuard(t, 1, nil)
+	g.SetMode(circuit.ModeDisabled)
+	fail(t, g, 10)
+
+	s := g.Snapshot()
+	if s.Mode != circuit.ModeDisabled || s.State != circuit.Closed || s.Counts.Total != 0 {
+		t.Fatalf("snapshot = %+v, want disabled, closed, nothing recorded", s)
+	}
+}
+
+func TestBeginEndWithoutPermit(t *testing.T) {
+	g, _ := newGuard(t, 1, nil)
+	tk, err := g.Begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	g.End(tk, errBoom)
+	if got := g.Snapshot().Counts; got.Total != 1 || got.Failures != 1 {
+		t.Fatalf("counts = %+v, want one failure", got)
+	}
+}
+
+func TestDefaultClockWorksWithoutOverride(t *testing.T) {
+	m := circuit.NewMachine(circuit.MachineConfig{
+		Policy:           circuit.Policy{MinCalls: 1, FailureRate: 1, SlowRate: 1},
+		OpenTimeout:      time.Hour,
+		HalfOpenMaxCalls: 1,
+		ProbeTimeout:     time.Hour,
+	}, circuit.NewCountWindow(4))
+	g := guard.New(m, guard.Options{SlowCallDuration: time.Hour})
+
+	mustAllow(t, g).Done(errBoom)
+	_, err := g.Allow(context.Background())
+	var rej *guard.RejectedError
+	if !errors.As(err, &rej) || rej.RetryAfter() <= 0 || rej.RetryAfter() > time.Hour {
+		t.Fatalf("err = %v, want rejection with a retry time within the hour", err)
+	}
+	if s := g.Snapshot(); time.Since(s.LastChange) > time.Minute || s.LastChange.IsZero() {
+		t.Fatalf("LastChange = %v, want a recent wall-clock time", s.LastChange)
+	}
+}
+
+// The lock-free reject window must never outlive the state it was taken from.
+
+func TestFastRejectStopsWhenOpenTimeoutPasses(t *testing.T) {
+	g, clk := newGuard(t, 1, nil)
+	fail(t, g, 2)
+	for range 3 { // served from the lock-free window
+		if _, err := g.Allow(context.Background()); !errors.Is(err, guard.ErrOpen) {
+			t.Fatalf("err = %v, want ErrOpen", err)
+		}
+	}
+
+	clk.Advance(openTimeout)
+	mustAllow(t, g) // the window must not keep rejecting after OpenTimeout
+	if got := g.Snapshot().State; got != circuit.HalfOpen {
+		t.Fatalf("State = %v, want half-open", got)
+	}
+}
+
+func TestFastRejectStopsAfterReset(t *testing.T) {
+	g, _ := newGuard(t, 1, nil)
+	fail(t, g, 2)
+	g.Allow(context.Background()) // publishes the window
+	g.Reset()
+	mustAllow(t, g)
+}
+
+func TestFastRejectFollowsClockStepBack(t *testing.T) {
+	g, clk := newGuard(t, 1, nil)
+	fail(t, g, 2)
+	_, before := g.Allow(context.Background())
+
+	clk.Advance(-time.Hour) // earlier than the moment the circuit opened
+	_, after := g.Allow(context.Background())
+	var rej *guard.RejectedError
+	if !errors.As(after, &rej) || !rej.RetryAt().Equal(clk.Now().Add(openTimeout)) {
+		t.Fatalf("err = %v, want RetryAt restarted from the new time %v", after, clk.Now().Add(openTimeout))
+	}
+	if after == before {
+		t.Fatal("the rejection value must change when the retry time changes")
+	}
+
+	clk.Advance(openTimeout)
+	mustAllow(t, g) // and it still recovers
+}
+
+func TestFastRejectCountsEveryRejection(t *testing.T) {
+	g, _ := newGuard(t, 1, nil)
+	fail(t, g, 2)
+	for range 5 {
+		g.Allow(context.Background())
+	}
+	if got := g.Snapshot().Rejected; got != 5 {
+		t.Fatalf("Rejected = %d, want 5", got)
+	}
+}
+
+func TestStaleFastWindowDoesNotOutliveTheOpenState(t *testing.T) {
+	g, clk := newGuard(t, 1, nil)
+	fail(t, g, 2)
+	g.Allow(context.Background()) // publishes the Open window [opened, opened+OpenTimeout)
+
+	clk.Advance(openTimeout)
+	mustAllow(t, g) // probe admitted: the circuit is Half-Open and the window is stale
+
+	// The clock steps back into the old window. The Half-Open probe is now "too far
+	// in the future", so the machine must re-open itself rather than let the stale
+	// window answer for it.
+	clk.Advance(-5 * time.Second)
+	g.Allow(context.Background())
+	if got := g.Snapshot().State; got != circuit.Open {
+		t.Fatalf("State = %v, want open: the stale window must not hide the Half-Open handling", got)
+	}
 }

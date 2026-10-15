@@ -77,6 +77,15 @@ returns an error if something is out of range.
 If you need more control than `Do`, use `Allow`, which returns a `Permit`. Call `Permit.Done(err)`
 when the call ends. It is safe to call more than once.
 
+### Operating the breaker
+
+- `cb.Snapshot()` returns the state, mode, counts, the number of rejected calls and the time of the last state change.
+- `cb.ForceOpen()` rejects every call until `cb.Reset()`. Use it to shed load during an incident.
+- `cb.Disable()` turns the breaker into a pass-through until `cb.Reset()`. It removes protection, so use it only if the breaker itself is the problem.
+- Implement `gosaf.RejectListener` on your `Listener` to be told about every rejected call.
+- `Disable` and `ForceOpen` on an already open circuit do not notify the `Listener`; read `Snapshot().Mode`.
+- `gosafslog.NewListener(logger)` logs state changes, calls and rejections with `log/slog`.
+
 ## What is included
 
 - Closed / Open / Half-Open state machine
@@ -87,6 +96,8 @@ when the call ends. It is safe to call more than once.
 - `context.Context` support
 - Injectable clock for tests
 - Listener for state changes and call results
+- Force open and disable switches for incidents
+- Optional log/slog integration (package gosafslog)
 
 ## What is not included
 

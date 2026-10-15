@@ -27,6 +27,8 @@ type (
 	Outcome = circuit.Outcome
 	// Counts summarises calls in the current window.
 	Counts = circuit.Counts
+	// Mode is an operator override: ModeNormal, ModeForcedOpen or ModeDisabled.
+	Mode = circuit.Mode
 	// Snapshot is a point-in-time copy of breaker state.
 	Snapshot = guard.Snapshot
 	// StateChange is delivered to Listener.OnStateChange.
@@ -41,7 +43,14 @@ type (
 	Listener = guard.Listener
 	// Permit is the right to make one call; report the result with Done.
 	Permit = guard.Permit
-	// RejectedError is returned when the circuit refuses a call.
+	// RejectListener is an optional extension of Listener that is told about
+	// every rejected call.
+	RejectListener = guard.RejectListener
+	// RejectEvent is delivered to RejectListener.OnReject.
+	RejectEvent = guard.RejectEvent
+	// RejectedError is returned when the circuit refuses a call. It is
+	// immutable and may be shared between callers; read it with State, RetryAt
+	// and RetryAfter.
 	RejectedError = guard.RejectedError
 )
 
@@ -50,6 +59,13 @@ const (
 	Closed   = circuit.Closed
 	Open     = circuit.Open
 	HalfOpen = circuit.HalfOpen
+)
+
+// Operator modes.
+const (
+	ModeNormal     = circuit.ModeNormal
+	ModeForcedOpen = circuit.ModeForcedOpen
+	ModeDisabled   = circuit.ModeDisabled
 )
 
 // Call outcomes.
@@ -81,9 +97,9 @@ func New(cfg Config) (*Breaker, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
-	clock := cfg.Clock
+	clock, wall := cfg.Clock, cfg.Clock
 	if clock == nil {
-		clock = time.Now
+		clock, wall = guard.MonotonicClock(), time.Now
 	}
 
 	var win circuit.Window
@@ -110,6 +126,7 @@ func New(cfg Config) (*Breaker, error) {
 		SlowCallDuration: cfg.SlowCallDuration,
 		IsFailure:        cfg.IsFailure,
 		Clock:            clock,
+		Wall:             wall,
 		Listener:         cfg.Listener,
 	})}, nil
 }
@@ -141,8 +158,29 @@ func (b *Breaker) Snapshot() Snapshot {
 // State returns the stored state; see Snapshot for when it changes.
 func (b *Breaker) State() State { return b.Snapshot().State }
 
-// Reset closes the circuit, clears its statistics and discards the results of
-// calls still in flight. Use it from operational tooling, not the hot path.
+// ForceOpen opens the circuit and keeps it open: every call is rejected with
+// ErrOpen until Reset. The circuit never moves to Half-Open by itself. Use it
+// to shed load from a dependency during an incident.
+func (b *Breaker) ForceOpen() {
+	if b == nil || b.g == nil {
+		return
+	}
+	b.g.SetMode(ModeForcedOpen)
+}
+
+// Disable turns the breaker into a pass-through: every call is allowed and
+// nothing is recorded, until Reset. It removes protection, so use it only when
+// the breaker itself is the problem.
+func (b *Breaker) Disable() {
+	if b == nil || b.g == nil {
+		return
+	}
+	b.g.SetMode(ModeDisabled)
+}
+
+// Reset returns to normal operation: the circuit is closed, its statistics are
+// cleared, any forced mode ends, and the results of calls still in flight are
+// discarded. Use it from operational tooling, not the hot path.
 func (b *Breaker) Reset() {
 	if b == nil || b.g == nil {
 		return
@@ -155,7 +193,10 @@ func (b *Breaker) Reset() {
 // A panic in fn is recorded as a failure and then re-raised with the original
 // value, so recover returns exactly what fn panicked with.
 func Do[T any](ctx context.Context, b *Breaker, fn func(context.Context) (T, error)) (res T, err error) {
-	p, err := b.Allow(ctx)
+	if b == nil || b.g == nil {
+		return res, errNotInitialized
+	}
+	tk, err := b.g.Begin(ctx)
 	if err != nil {
 		return res, err
 	}
@@ -167,7 +208,7 @@ func Do[T any](ctx context.Context, b *Breaker, fn func(context.Context) (T, err
 		}
 		// fn panicked or called runtime.Goexit: free the slot, then let it continue.
 		r := recover()
-		p.Done(errPanicked)
+		b.g.End(tk, errPanicked)
 		if r != nil {
 			panic(r)
 		}
@@ -175,6 +216,6 @@ func Do[T any](ctx context.Context, b *Breaker, fn func(context.Context) (T, err
 
 	res, err = fn(ctx)
 	finished = true
-	p.Done(err)
+	b.g.End(tk, err)
 	return res, err
 }
